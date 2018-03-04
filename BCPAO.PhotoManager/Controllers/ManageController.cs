@@ -13,25 +13,24 @@ using Microsoft.Extensions.Options;
 using BCPAO.PhotoManager.Models;
 using BCPAO.PhotoManager.Models.ManageViewModels;
 using BCPAO.PhotoManager.Services;
+using BCPAO.PhotoManager.Data.Entities;
 
 namespace BCPAO.PhotoManager.Controllers
 {
-    [Authorize]
     [Route("[controller]/[action]")]
     public class ManageController : Controller
     {
-        private readonly UserManager<ApplicationUser> _userManager;
-        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly UserManager<User> _userManager;
+        private readonly SignInManager<User> _signInManager;
         private readonly IEmailSender _emailSender;
         private readonly ILogger _logger;
         private readonly UrlEncoder _urlEncoder;
 
-        private const string AuthenticatorUriFormat = "otpauth://totp/{0}:{1}?secret={2}&issuer={0}&digits=6";
-        private const string RecoveryCodesKey = nameof(RecoveryCodesKey);
+        private const string AuthenicatorUriFormat = "otpauth://totp/{0}:{1}?secret={2}&issuer={0}&digits=6";
 
         public ManageController(
-          UserManager<ApplicationUser> userManager,
-          SignInManager<ApplicationUser> signInManager,
+          UserManager<User> userManager,
+          SignInManager<User> signInManager,
           IEmailSender emailSender,
           ILogger<ManageController> logger,
           UrlEncoder urlEncoder)
@@ -122,7 +121,7 @@ namespace BCPAO.PhotoManager.Controllers
             }
 
             var code = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-            var callbackUrl = Url.EmailConfirmationLink(user.Id, code, Request.Scheme);
+            var callbackUrl = Url.EmailConfirmationLink(user.Id.ToString(), code, Request.Scheme);
             var email = user.Email;
             await _emailSender.SendEmailConfirmationAsync(email, callbackUrl);
 
@@ -227,87 +226,6 @@ namespace BCPAO.PhotoManager.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> ExternalLogins()
-        {
-            var user = await _userManager.GetUserAsync(User);
-            if (user == null)
-            {
-                throw new ApplicationException($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
-            }
-
-            var model = new ExternalLoginsViewModel { CurrentLogins = await _userManager.GetLoginsAsync(user) };
-            model.OtherLogins = (await _signInManager.GetExternalAuthenticationSchemesAsync())
-                .Where(auth => model.CurrentLogins.All(ul => auth.Name != ul.LoginProvider))
-                .ToList();
-            model.ShowRemoveButton = await _userManager.HasPasswordAsync(user) || model.CurrentLogins.Count > 1;
-            model.StatusMessage = StatusMessage;
-
-            return View(model);
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> LinkLogin(string provider)
-        {
-            // Clear the existing external cookie to ensure a clean login process
-            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
-
-            // Request a redirect to the external login provider to link a login for the current user
-            var redirectUrl = Url.Action(nameof(LinkLoginCallback));
-            var properties = _signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl, _userManager.GetUserId(User));
-            return new ChallengeResult(provider, properties);
-        }
-
-        [HttpGet]
-        public async Task<IActionResult> LinkLoginCallback()
-        {
-            var user = await _userManager.GetUserAsync(User);
-            if (user == null)
-            {
-                throw new ApplicationException($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
-            }
-
-            var info = await _signInManager.GetExternalLoginInfoAsync(user.Id);
-            if (info == null)
-            {
-                throw new ApplicationException($"Unexpected error occurred loading external login info for user with ID '{user.Id}'.");
-            }
-
-            var result = await _userManager.AddLoginAsync(user, info);
-            if (!result.Succeeded)
-            {
-                throw new ApplicationException($"Unexpected error occurred adding external login for user with ID '{user.Id}'.");
-            }
-
-            // Clear the existing external cookie to ensure a clean login process
-            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
-
-            StatusMessage = "The external login was added.";
-            return RedirectToAction(nameof(ExternalLogins));
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RemoveLogin(RemoveLoginViewModel model)
-        {
-            var user = await _userManager.GetUserAsync(User);
-            if (user == null)
-            {
-                throw new ApplicationException($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
-            }
-
-            var result = await _userManager.RemoveLoginAsync(user, model.LoginProvider, model.ProviderKey);
-            if (!result.Succeeded)
-            {
-                throw new ApplicationException($"Unexpected error occurred removing external login for user with ID '{user.Id}'.");
-            }
-
-            await _signInManager.SignInAsync(user, isPersistent: false);
-            StatusMessage = "The external login was removed.";
-            return RedirectToAction(nameof(ExternalLogins));
-        }
-
-        [HttpGet]
         public async Task<IActionResult> TwoFactorAuthentication()
         {
             var user = await _userManager.GetUserAsync(User);
@@ -372,8 +290,18 @@ namespace BCPAO.PhotoManager.Controllers
                 throw new ApplicationException($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
             }
 
-            var model = new EnableAuthenticatorViewModel();
-            await LoadSharedKeyAndQrCodeUriAsync(user, model);
+            var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+            if (string.IsNullOrEmpty(unformattedKey))
+            {
+                await _userManager.ResetAuthenticatorKeyAsync(user);
+                unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+            }
+
+            var model = new EnableAuthenticatorViewModel
+            {
+                SharedKey = FormatKey(unformattedKey),
+                AuthenticatorUri = GenerateQrCodeUri(user.Email, unformattedKey)
+            };
 
             return View(model);
         }
@@ -382,16 +310,15 @@ namespace BCPAO.PhotoManager.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EnableAuthenticator(EnableAuthenticatorViewModel model)
         {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
             var user = await _userManager.GetUserAsync(User);
             if (user == null)
             {
                 throw new ApplicationException($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
-            }
-
-            if (!ModelState.IsValid)
-            {
-                await LoadSharedKeyAndQrCodeUriAsync(user, model);
-                return View(model);
             }
 
             // Strip spaces and hypens
@@ -402,30 +329,13 @@ namespace BCPAO.PhotoManager.Controllers
 
             if (!is2faTokenValid)
             {
-                ModelState.AddModelError("Code", "Verification code is invalid.");
-                await LoadSharedKeyAndQrCodeUriAsync(user, model);
+                ModelState.AddModelError("model.Code", "Verification code is invalid.");
                 return View(model);
             }
 
             await _userManager.SetTwoFactorEnabledAsync(user, true);
             _logger.LogInformation("User with ID {UserId} has enabled 2FA with an authenticator app.", user.Id);
-            var recoveryCodes = await _userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
-            TempData[RecoveryCodesKey] = recoveryCodes.ToArray();
-
-            return RedirectToAction(nameof(ShowRecoveryCodes));
-        }
-
-        [HttpGet]
-        public IActionResult ShowRecoveryCodes()
-        {
-            var recoveryCodes = (string[])TempData[RecoveryCodesKey];
-            if (recoveryCodes == null)
-            {
-                return RedirectToAction(nameof(TwoFactorAuthentication));
-            }
-
-            var model = new ShowRecoveryCodesViewModel { RecoveryCodes = recoveryCodes };
-            return View(model);
+            return RedirectToAction(nameof(GenerateRecoveryCodes));
         }
 
         [HttpGet]
@@ -452,24 +362,6 @@ namespace BCPAO.PhotoManager.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GenerateRecoveryCodesWarning()
-        {
-            var user = await _userManager.GetUserAsync(User);
-            if (user == null)
-            {
-                throw new ApplicationException($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
-            }
-
-            if (!user.TwoFactorEnabled)
-            {
-                throw new ApplicationException($"Cannot generate recovery codes for user with ID '{user.Id}' because they do not have 2FA enabled.");
-            }
-
-            return View(nameof(GenerateRecoveryCodes));
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
         public async Task<IActionResult> GenerateRecoveryCodes()
         {
             var user = await _userManager.GetUserAsync(User);
@@ -484,11 +376,11 @@ namespace BCPAO.PhotoManager.Controllers
             }
 
             var recoveryCodes = await _userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
+            var model = new GenerateRecoveryCodesViewModel { RecoveryCodes = recoveryCodes.ToArray() };
+
             _logger.LogInformation("User with ID {UserId} has generated new 2FA recovery codes.", user.Id);
 
-            var model = new ShowRecoveryCodesViewModel { RecoveryCodes = recoveryCodes.ToArray() };
-
-            return View(nameof(ShowRecoveryCodes), model);
+            return View(model);
         }
 
         #region Helpers
@@ -521,23 +413,10 @@ namespace BCPAO.PhotoManager.Controllers
         private string GenerateQrCodeUri(string email, string unformattedKey)
         {
             return string.Format(
-                AuthenticatorUriFormat,
+                AuthenicatorUriFormat,
                 _urlEncoder.Encode("BCPAO.PhotoManager"),
                 _urlEncoder.Encode(email),
                 unformattedKey);
-        }
-
-        private async Task LoadSharedKeyAndQrCodeUriAsync(ApplicationUser user, EnableAuthenticatorViewModel model)
-        {
-            var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
-            if (string.IsNullOrEmpty(unformattedKey))
-            {
-                await _userManager.ResetAuthenticatorKeyAsync(user);
-                unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
-            }
-
-            model.SharedKey = FormatKey(unformattedKey);
-            model.AuthenticatorUri = GenerateQrCodeUri(user.Email, unformattedKey);
         }
 
         #endregion
