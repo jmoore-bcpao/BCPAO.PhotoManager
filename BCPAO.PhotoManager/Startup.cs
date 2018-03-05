@@ -11,18 +11,20 @@ using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using System;
+using System.Reflection;
 
 namespace BCPAO.PhotoManager
 {
 	public class Startup
 	{
-		public IConfiguration Configuration { get; }
+		private readonly IConfiguration _config;
 		private readonly IHostingEnvironment _hostingEnv;
 
-		public Startup(IConfiguration configuration, IHostingEnvironment hostingEnv)
+		public Startup(IConfiguration config, IHostingEnvironment hostingEnv)
 		{
-			Configuration = configuration;
+			_config = config;
 			_hostingEnv = hostingEnv;
 		}
 
@@ -31,7 +33,7 @@ namespace BCPAO.PhotoManager
 		public void ConfigureServices(IServiceCollection services)
 		{
 			services.AddDbContext<DatabaseContext>(options =>
-				 options.UseSqlServer(Configuration.GetConnectionString("DefaultConnection")));
+				 options.UseSqlServer(_config.GetConnectionString("DefaultConnection")));
 
 			services.AddIdentity<User, Role>()
 				 .AddEntityFrameworkStores<DatabaseContext>()
@@ -73,7 +75,7 @@ namespace BCPAO.PhotoManager
 			// Add application services.
 			services.AddTransient<IEmailSender, EmailSender>();
 			services.AddScoped<IPhotoRepository, PhotoRepository>();
-
+         
 			// Requires all authentication on all controllers. Use [AllowAnonymous] for anonymous access.
 			services.AddMvc(config =>
 			{
@@ -81,7 +83,7 @@ namespace BCPAO.PhotoManager
 				config.Filters.Add(new AuthorizeFilter(policy));
 			});
 			
-			var skipSSL = Configuration.GetValue<bool>("LocalTest:skipSSL");
+			var skipSSL = _config.GetValue<bool>("LocalTest:skipSSL");
 			services.Configure<MvcOptions>(options =>
 			{
 				if (_hostingEnv.IsDevelopment() && !skipSSL)
@@ -89,6 +91,15 @@ namespace BCPAO.PhotoManager
 					options.Filters.Add(new RequireHttpsAttribute());
 				}
 			});
+
+         var physicalProvider = _hostingEnv.ContentRootFileProvider;
+         //var embeddedProvider = new EmbeddedFileProvider(Assembly.GetEntryAssembly());
+         //var compositeProvider = new CompositeFileProvider(physicalProvider, embeddedProvider);
+
+         // choose one provider to use for the app and register it
+         services.AddSingleton<IFileProvider>(physicalProvider);
+         //services.AddSingleton<IFileProvider>(embeddedProvider);
+         //services.AddSingleton<IFileProvider>(compositeProvider);
 
 		}
 
@@ -117,25 +128,6 @@ namespace BCPAO.PhotoManager
 						 template: "{controller=Home}/{action=Index}/{id?}");
 			});
 
-			var defaultAdminPwd = Configuration["defaultAdminPwd"];
-			
-			//try
-			//{
-			//	SeedData.Initialize(app.ApplicationServices, defaultAdminPwd).Wait();
-			//}
-			//catch (Exception)
-			//{
-			//	throw;
-			//}
-
-			//using (var serviceScope = app.ApplicationServices.GetRequiredService<IServiceScopeFactory>().CreateScope())
-			//{
-			//	if (!serviceScope.ServiceProvider.GetService<DatabaseContext>().AllMigrationsApplied())
-			//	{
-			//		serviceScope.ServiceProvider.GetService<DatabaseContext>().Database.Migrate();
-			//		serviceScope.ServiceProvider.GetService<DatabaseContext>().EnsureSeeded();
-			//	}
-			//}
 		}
 	}
 }

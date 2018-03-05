@@ -1,149 +1,168 @@
 ﻿using BCPAO.PhotoManager.Data;
-using BCPAO.PhotoManager.Data.Entities;
+using BCPAO.PhotoManager.Models;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.Linq;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Net.Http.Headers;
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace BCPAO.PhotoManager.Controllers
 {
-	public class PhotosController : Controller
-    {
-        private readonly DatabaseContext _context;
+   public class PhotosController : Controller
+   {
+      private readonly DatabaseContext _context;
+      private readonly IPhotoRepository _photoRepo;
+      private readonly IFileProvider _fileProvider;
 
-        public PhotosController(DatabaseContext context)
-        {
-            _context = context;
-        }
+      private readonly string path = @"D:\photos";
 
-        // GET: Permit
-        public async Task<IActionResult> Index()
-        {
-            return View(await _context.Photos.ToListAsync());
-        }
+      public PhotosController(DatabaseContext context, IPhotoRepository photoRepo, IFileProvider fileProvider)
+      {
+         _context = context;
+         _photoRepo = photoRepo;
+         _fileProvider = fileProvider;
+      }
 
-        // GET: Permit/Details/5
-        public async Task<IActionResult> Details(int? id)
-        {
-            if (id == null)
+      public IActionResult Index()
+      {
+         return View();
+      }
+
+      [HttpPost]
+      public async Task<IActionResult> UploadFile(IFormFile file)
+      {
+         if (file == null || file.Length == 0)
+            return Content("file not selected");
+
+         var path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot\\uploads", file.GetFilename());
+
+         using (var stream = new FileStream(path, FileMode.Create))
+         {
+            await file.CopyToAsync(stream);
+         }
+
+         return RedirectToAction("Files");
+      }
+
+      [HttpPost]
+      public async Task<IActionResult> UploadFiles(List<IFormFile> files)
+      {
+         if (files == null || files.Count == 0)
+            return Content("files not selected");
+
+         if (ModelState.IsValid)
+         {
+            foreach (var file in files)
             {
-                return NotFound();
-            }
+               //var path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot\\uploads", file.GetFilename());
+               var fileName = ContentDispositionHeaderValue.Parse(file.ContentDisposition).FileName.ToString().Trim('"');
 
-            var photo = await _context.Photos.SingleOrDefaultAsync(m => m.PhotoId == id);
-            if (photo == null)
+               using (var fileStream = new FileStream(Path.Combine(path, fileName), FileMode.Create))
+               {
+                  using (var memoryStream = new MemoryStream())
+                  {
+                     await file.CopyToAsync(memoryStream);
+
+                     var photo = new Photo
+                     {
+                        PropertyId = null,
+                        BuildingId = null,
+                        BuildingSeq = null,
+                        MasterPhoto = null,
+                        FrontPhoto = null,
+                        PublicPhoto = null,
+                        DateTaken = null,
+                        ImageName = file.GetFilename(),
+                        ImageSize = file.Length / 1024,
+                        ImageData = memoryStream.ToArray(),
+                        UserId = 1,
+                        UploadedBy = User.Identity.Name.ToLower(),
+                        UploadedDate = DateTime.Now,
+                        Status = "Pending",
+                        Active = false,
+                     };
+
+                     _photoRepo.AddPhoto(photo);
+                  }
+               }
+            }
+         }
+         
+         return RedirectToAction("Files");
+      }
+
+      [HttpPost]
+      public async Task<IActionResult> UploadFileViaModel(FileInputModel model)
+      {
+         if (model == null ||
+             model.FileToUpload == null || model.FileToUpload.Length == 0)
+            return Content("file not selected");
+
+         var path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot\\uploads", model.FileToUpload.GetFilename());
+
+         using (var stream = new FileStream(path, FileMode.Create))
+         {
+            await model.FileToUpload.CopyToAsync(stream);
+         }
+
+         return RedirectToAction("Files");
+      }
+
+      public IActionResult Files()
+      {
+         var model = new FilesViewModel();
+
+         var test = _fileProvider.GetDirectoryContents(path);
+
+         foreach (var item in _fileProvider.GetDirectoryContents(path))
+         {
+            model.Files.Add(new FileDetails { Name = item.Name, Path = item.PhysicalPath, Url = path + item.Name });
+         }
+         return View(model);
+      }
+
+      public async Task<IActionResult> Download(string filename)
+      {
+         if (filename == null)
+            return Content("filename not present");
+
+         //var path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot\\uploads", filename);
+
+         var memoryStream = new MemoryStream();
+         using (var fileStream = new FileStream(path, FileMode.Open))
+         {
+            await fileStream.CopyToAsync(memoryStream);
+         }
+         memoryStream.Position = 0;
+         return File(memoryStream, GetContentType(path), Path.GetFileName(path));
+      }
+
+      private string GetContentType(string path)
+      {
+         var types = GetMimeTypes();
+         var ext = Path.GetExtension(path).ToLowerInvariant();
+         return types[ext];
+      }
+
+      private Dictionary<string, string> GetMimeTypes()
+      {
+         return new Dictionary<string, string>
             {
-                return NotFound();
-            }
-
-            return View(photo);
-        }
-
-        // GET: Permit/Create
-        public IActionResult Create()
-        {
-            return View();
-        }
-
-        // POST: Permit/Create
-        // To protect from overposting attacks, please enable the specific properties you want to bind to, for 
-        // more details see http://go.microsoft.com/fwlink/?LinkId=317598.
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create([Bind("Id,PhotoId,PropertyId,ParcelId,PermitNumber,Photostatus,IssueDate,FinalDate,PermitValue,PermitDesc,PermitCode,DistrictAuthority,CreateDate")] Photo permit)
-        {
-            if (ModelState.IsValid)
-            {
-                _context.Add(permit);
-                await _context.SaveChangesAsync();
-                return RedirectToAction(nameof(Index));
-            }
-            return View(permit);
-        }
-
-        // GET: Permit/Edit/5
-        public async Task<IActionResult> Edit(int? id)
-        {
-            if (id == null)
-            {
-                return NotFound();
-            }
-
-            var photo = await _context.Photos.SingleOrDefaultAsync(m => m.PhotoId == id);
-            if (photo == null)
-            {
-                return NotFound();
-            }
-            return View(photo);
-        }
-
-        // POST: Permit/Edit/5
-        // To protect from overposting attacks, please enable the specific properties you want to bind to, for 
-        // more details see http://go.microsoft.com/fwlink/?LinkId=317598.
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(int id, [Bind("Id,PhotoId,PropertyId")] Photo photo)
-        {
-            if (id != photo.PhotoId)
-            {
-                return NotFound();
-            }
-
-            if (ModelState.IsValid)
-            {
-                try
-                {
-                    _context.Update(photo);
-                    await _context.SaveChangesAsync();
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    if (!BuildingPermitExists(photo.PhotoId))
-                    {
-                        return NotFound();
-                    }
-                    else
-                    {
-                        throw;
-                    }
-                }
-                return RedirectToAction(nameof(Index));
-            }
-            return View(photo);
-        }
-
-        // GET: Permit/Delete/5
-        public async Task<IActionResult> Delete(int? id)
-        {
-            if (id == null)
-            {
-                return NotFound();
-            }
-
-            var buildingPermit = await _context.Photos
-                .SingleOrDefaultAsync(m => m.PhotoId == id);
-            if (buildingPermit == null)
-            {
-                return NotFound();
-            }
-
-            return View(buildingPermit);
-        }
-
-        // POST: Permit/Delete/5
-        [HttpPost, ActionName("Delete")]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteConfirmed(int id)
-        {
-            var buildingPermit = await _context.Photos.SingleOrDefaultAsync(m => m.PhotoId == id);
-            _context.Photos.Remove(buildingPermit);
-            await _context.SaveChangesAsync();
-            return RedirectToAction(nameof(Index));
-        }
-
-        private bool BuildingPermitExists(int id)
-        {
-            return _context.Photos.Any(e => e.PhotoId == id);
-        }
-    }
+                {".txt", "text/plain"},
+                {".pdf", "application/pdf"},
+                {".doc", "application/vnd.ms-word"},
+                {".docx", "application/vnd.ms-word"},
+                {".xls", "application/vnd.ms-excel"},
+                {".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+                {".png", "image/png"},
+                {".jpg", "image/jpeg"},
+                {".jpeg", "image/jpeg"},
+                {".gif", "image/gif"},
+                {".csv", "text/csv"}
+            };
+      }
+   }
 }

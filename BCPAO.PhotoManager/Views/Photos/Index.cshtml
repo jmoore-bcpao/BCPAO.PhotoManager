@@ -3,5 +3,28 @@
     ViewData["Title"] = "Photos";
 }
 
-<h2>Photos</h2>
+<div style="margin:40px;">
+   <h2>File Upload</h2>
 
+   <div style="border: 1px solid #ccc;margin-bottom:20px;padding:20px;background-color:lightyellow;">
+      <p>Single File Upload</p>
+      <form asp-controller="Photos" asp-action="UploadFile" method="post" enctype="multipart/form-data">
+         <input type="file" name="file" />
+         <button type="submit">Upload File</button>
+      </form>
+   </div>
+   <div style="border: 1px solid #ccc;margin-bottom:20px;padding:20px;background-color:lightyellow;">
+      <p>Multiple File Upload</p>
+      <form asp-controller="Photos" asp-action="UploadFiles" method="post" enctype="multipart/form-data">
+         <input type="file" name="files" multiple />
+         <button type="submit">Upload File</button>
+      </form>
+   </div>
+   <div style="border: 1px solid #ccc;margin-bottom:20px;padding:20px;background-color:lightyellow;">
+      <p>File Upload (model)</p>
+      <form asp-controller="Photos" asp-action="UploadFileViaModel" method="post" enctype="multipart/form-data">
+         <input type="file" name="FileToUpload" />
+         <button type="submit">Upload File</button>
+      </form>
+   </div>
+</div>

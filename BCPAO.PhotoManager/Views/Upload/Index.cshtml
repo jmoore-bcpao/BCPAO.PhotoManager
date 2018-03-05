@@ -1,44 +1,7 @@
 ﻿
 @{
-   ViewData["Title"] = "Index";
+    ViewData["Title"] = "Upload";
 }
 
-<h1>Permit File Upload</h1>
+<h2>Upload</h2>
 
-<div class="jumbotron" style="border: 4px dashed #ccc;">
-   <div class="row">
-      <div class="col-md-1">
-         <img src="~/img/cot-seal.png" alt="Logo" />
-      </div>
-      <div class="col-md-11">
-         <h1 class="display-4">City of Titusville: Permit Data Import</h1>
-         <p class="lead">This is a simple web application to help manage collecting of permit data from surrounding municipalities in Brevard County.</p>
-      </div>
-   </div>
-   <hr class="my-4">
-   <p>The application uses file upload (formats: XLS, XLSX, CSV, TXT) to collect the data, parse, and stores into a database.</p>
-
-   <form method="post" enctype="multipart/form-data" asp-controller="UploadFile" asp-action="Titusville">
-      <div class="form-group">
-         <div class="col-md-6">
-
-            <input type="file" name="file" class="btn btn-primary btn-lg" />
-            @*<input type="submit" name="btnSubmit" class="btn btn-primary btn-lg" />*@
-
-            @*<div class="custom-file">
-         <input type="file" class="custom-file-input" id="customFile">
-         <label class="custom-file-label" for="customFile">Choose a file...</label>
-      </div>*@
-
-         </div>
-      </div>
-      <div class="form-group">
-         <div class="col-md-12">
-            <button type="submit" value="Upload" class="btn btn-info btn-lg" role="button">
-               <i class="fas fa-upload"></i>&nbsp;Upload file...
-            </button>
-         </div>
-      </div>
-   </form>
-
-</div>
